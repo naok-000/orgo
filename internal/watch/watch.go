@@ -25,6 +25,14 @@ type Watcher struct {
 	debounce time.Duration
 	onChange func()
 	fsw      *fsnotify.Watcher
+
+	// dirs records every directory a watch was added for. Remove/Rename
+	// events carry only a path — by the time they arrive the entry is gone
+	// from disk, so this set is the only way to tell "a watched directory
+	// (possibly full of org files) went away" apart from an uninteresting
+	// file deletion. Written by addDirs before the loop starts and then
+	// only touched from the loop goroutine, so it needs no locking.
+	dirs map[string]bool
 }
 
 // New creates a Watcher rooted at root. It does not start watching until
@@ -34,7 +42,7 @@ func New(root string, debounce time.Duration, onChange func()) (*Watcher, error)
 	if err != nil {
 		return nil, err
 	}
-	w := &Watcher{root: root, debounce: debounce, onChange: onChange, fsw: fsw}
+	w := &Watcher{root: root, debounce: debounce, onChange: onChange, fsw: fsw, dirs: map[string]bool{}}
 	if err := w.addDirs(root); err != nil {
 		fsw.Close()
 		return nil, err
@@ -71,7 +79,9 @@ func (w *Watcher) addDirs(root string) error {
 		}
 		if err := w.fsw.Add(path); err != nil {
 			log.Printf("watch: failed to watch %s: %v", path, err)
+			return nil
 		}
+		w.dirs[path] = true
 		return nil
 	})
 }
@@ -116,10 +126,23 @@ func (w *Watcher) loop(ctx context.Context) {
 			}
 			if ev.Op&fsnotify.Create != 0 {
 				if info, err := os.Stat(ev.Name); err == nil && info.IsDir() {
+					// A directory appeared — mkdir, or a whole tree renamed
+					// in from outside. Watch it, and re-index: a renamed-in
+					// directory may already contain org files that will
+					// never produce events of their own.
 					if err := w.addDirs(ev.Name); err != nil {
 						log.Printf("watch: %v", err)
 					}
+					resetTimer()
+					continue
 				}
+			}
+			if ev.Op&(fsnotify.Remove|fsnotify.Rename) != 0 && w.dirs[ev.Name] {
+				// A watched directory was deleted or renamed away; the org
+				// files it contained vanish without per-file events.
+				delete(w.dirs, ev.Name)
+				resetTimer()
+				continue
 			}
 			if strings.EqualFold(filepath.Ext(name), ".org") {
 				resetTimer()

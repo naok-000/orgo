@@ -1,7 +1,8 @@
 import { ApiError, getGraph, getMeta, getNote, getNotes, search, subscribeEvents } from "./api.ts";
-import type { GraphResponse, Meta, NoteDetail, NoteSummary } from "./types.ts";
+import type { GraphResponse, Meta, NoteSummary } from "./types.ts";
 import { formatRoute, parseHash, type Route } from "./router.ts";
 import { NamespacedStorage } from "./store/storage.ts";
+import { NoteCache } from "./store/noteCache.ts";
 import { TabStore } from "./store/tabs.ts";
 import {
   PreferencesStore,
@@ -55,8 +56,7 @@ class App {
   private notes: NoteSummary[] = [];
   private notesById = new Map<string, NoteSummary>();
   private fullGraph: GraphResponse = { nodes: [], edges: [] };
-  private noteCache = new Map<string, NoteDetail>();
-  private noteFetchInFlight = new Map<string, Promise<NoteDetail>>();
+  private readonly noteCache = new NoteCache((id) => getNote(id));
 
   private currentRoute: Route = { type: "empty" };
   private lastGraphRoute: Route = { type: "graph" };
@@ -386,22 +386,25 @@ class App {
   }
 
   private loadAndShowNote(id: string): void {
-    const cached = this.noteCache.get(id);
+    const cached = this.noteCache.peek(id);
     if (cached) {
       this.noteView.showNote(cached);
       return;
     }
     this.noteView.showLoading();
-    this.fetchNote(id).then(
+    this.noteCache.fetch(id).then(
       (note) => {
+        this.tabStore.setMissing(id, false);
         if (this.currentRoute.type === "note" && this.currentRoute.id === id) {
           this.noteView.showNote(note);
         }
       },
       (err: unknown) => {
-        if (!(this.currentRoute.type === "note" && this.currentRoute.id === id)) return;
         if (err instanceof ApiError && err.status === 404) {
           this.tabStore.setMissing(id, true);
+        }
+        if (!(this.currentRoute.type === "note" && this.currentRoute.id === id)) return;
+        if (err instanceof ApiError && err.status === 404) {
           this.noteView.showMissing(id);
         } else {
           this.noteView.showError(err instanceof Error ? err.message : String(err));
@@ -410,26 +413,8 @@ class App {
     );
   }
 
-  private fetchNote(id: string): Promise<NoteDetail> {
-    const inFlight = this.noteFetchInFlight.get(id);
-    if (inFlight) return inFlight;
-    const p = getNote(id)
-      .then((note) => {
-        this.noteCache.set(id, note);
-        this.tabStore.setMissing(id, false);
-        this.noteFetchInFlight.delete(id);
-        return note;
-      })
-      .catch((err: unknown) => {
-        this.noteFetchInFlight.delete(id);
-        throw err;
-      });
-    this.noteFetchInFlight.set(id, p);
-    return p;
-  }
-
   private titleForNote(id: string): string {
-    return this.noteCache.get(id)?.title ?? this.notesById.get(id)?.title ?? id;
+    return this.noteCache.peek(id)?.title ?? this.notesById.get(id)?.title ?? id;
   }
 
   private reconcileMissingTabs(): void {
@@ -509,9 +494,12 @@ class App {
   // ---- live reload ----------------------------------------------------
 
   private async handleReload(): Promise<void> {
+    // Anything cached may be stale after a re-index: drop the whole note
+    // cache so focusing ANY tab (not just the active one) re-fetches — a
+    // note deleted on disk then 404s and shows the missing state.
+    this.noteCache.invalidateAll();
     await Promise.all([this.loadNotes(), this.loadGraph()]);
     if (this.currentRoute.type === "note") {
-      this.noteCache.delete(this.currentRoute.id);
       this.loadAndShowNote(this.currentRoute.id);
     }
   }

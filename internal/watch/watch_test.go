@@ -135,3 +135,56 @@ func TestWatcherDetectsFileInNewSubdirectory(t *testing.T) {
 
 	waitForChange(t, changed, 2*time.Second)
 }
+
+// TestWatcherFiresOnDirectoryRenamedIntoTree: renaming a directory that
+// already contains org files into the watched tree produces only a single
+// directory-level Create event — the watcher must still re-index (and start
+// watching the new directory).
+func TestWatcherFiresOnDirectoryRenamedIntoTree(t *testing.T) {
+	root := t.TempDir()
+	staging := t.TempDir()
+	src := filepath.Join(staging, "incoming")
+	if err := os.Mkdir(src, 0o755); err != nil {
+		t.Fatalf("Mkdir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(src, "note.org"), []byte("#+title: Incoming\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	_, changed := newTestWatcher(t, root)
+
+	if err := os.Rename(src, filepath.Join(root, "incoming")); err != nil {
+		t.Fatalf("Rename: %v", err)
+	}
+
+	waitForChange(t, changed, 2*time.Second)
+
+	// The renamed-in directory must also be watched from now on: a new note
+	// created inside it must fire again.
+	if err := os.WriteFile(filepath.Join(root, "incoming", "later.org"), []byte("#+title: Later\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	waitForChange(t, changed, 2*time.Second)
+}
+
+// TestWatcherFiresOnDirectoryRenamedOutOfTree: moving/deleting a directory
+// full of org files emits only a directory-level Rename/Remove event; the
+// watcher must still re-index.
+func TestWatcherFiresOnDirectoryRenamedOutOfTree(t *testing.T) {
+	root := t.TempDir()
+	sub := filepath.Join(root, "sub")
+	if err := os.Mkdir(sub, 0o755); err != nil {
+		t.Fatalf("Mkdir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(sub, "note.org"), []byte("#+title: Note\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	_, changed := newTestWatcher(t, root)
+
+	if err := os.Rename(sub, filepath.Join(t.TempDir(), "gone")); err != nil {
+		t.Fatalf("Rename: %v", err)
+	}
+
+	waitForChange(t, changed, 2*time.Second)
+}

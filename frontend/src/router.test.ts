@@ -41,6 +41,27 @@ describe("parseHash", () => {
     expect(parseHash("#/something/else/entirely")).toEqual({ type: "empty" });
     expect(parseHash("#garbage")).toEqual({ type: "empty" });
   });
+
+  it("falls back to empty (instead of throwing URIError) on malformed percent-encoding", () => {
+    expect(parseHash("#/note/%")).toEqual({ type: "empty" });
+    expect(parseHash("#/note/%2")).toEqual({ type: "empty" });
+    expect(parseHash("#/note/%zz")).toEqual({ type: "empty" });
+    expect(parseHash("#/graph/%")).toEqual({ type: "empty" });
+    expect(parseHash("#/graph/%E0%A4%A")).toEqual({ type: "empty" });
+  });
+
+  it("treats everything after note/ as one encoded segment: %2F decodes into the id", () => {
+    expect(parseHash("#/note/area%2Fproject")).toEqual({ type: "note", id: "area/project" });
+    expect(parseHash("#/graph/area%2Fproject")).toEqual({
+      type: "graph-local",
+      id: "area/project",
+    });
+  });
+
+  it("folds a raw (unencoded) slash in the remainder into the id rather than splitting", () => {
+    expect(parseHash("#/note/area/project")).toEqual({ type: "note", id: "area/project" });
+    expect(parseHash("#/graph/a/b/c")).toEqual({ type: "graph-local", id: "a/b/c" });
+  });
 });
 
 describe("formatRoute", () => {
@@ -53,13 +74,24 @@ describe("formatRoute", () => {
 
   it("encodes ids that need it", () => {
     expect(formatRoute({ type: "note", id: "foo bar" })).toBe("#/note/foo%20bar");
+    expect(formatRoute({ type: "note", id: "area/project" })).toBe("#/note/area%2Fproject");
   });
 
-  it("round-trips through parseHash", () => {
+  it("round-trips through parseHash: parse(format(route)) === route", () => {
+    const ids = [
+      "aaaa-1111",
+      "55555555-5555-4555-8555-555555555555", // plain UUID
+      "area/project", // contains "/"
+      "a b", // contains a space
+      "100%", // contains "%"
+      "notes/日本語/メモ", // non-ASCII + slashes
+    ];
     const routes: Route[] = [
       { type: "graph" },
-      { type: "graph-local", id: "aaaa-1111" },
-      { type: "note", id: "aaaa-1111" },
+      ...ids.flatMap((id): Route[] => [
+        { type: "note", id },
+        { type: "graph-local", id },
+      ]),
     ];
     for (const r of routes) {
       expect(parseHash(formatRoute(r))).toEqual(r);

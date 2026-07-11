@@ -49,6 +49,55 @@ func TestRenderIDLinkWithoutDescription(t *testing.T) {
 	}
 }
 
+// TestRenderIDLinkPathEscapesNonUUIDIDs: ids are not required to be UUIDs;
+// an id containing '/' (or other URL-special characters) must be
+// percent-encoded so it stays a single path segment of the in-app route.
+func TestRenderIDLinkPathEscapesNonUUIDIDs(t *testing.T) {
+	src := "[[id:area/project][proj]]"
+	got, err := Render(src, resolverFor("area/project"))
+	if err != nil {
+		t.Fatalf("Render: %v", err)
+	}
+	want := `href="#/note/area%2Fproject"`
+	if !strings.Contains(got, want) {
+		t.Fatalf("output missing percent-encoded id link.\n got: %s\nwant substring: %s", got, want)
+	}
+	if strings.Contains(got, `href="#/note/area/project"`) {
+		t.Fatalf("id must not appear unencoded in href: %s", got)
+	}
+}
+
+// TestRenderCommentBlockNotExported: org never exports comment blocks; the
+// renderer must drop them (matching the indexer, which does not scan them
+// for links).
+func TestRenderCommentBlockNotExported(t *testing.T) {
+	src := "#+begin_comment\nsecret [[id:11111111-1111-4111-8111-111111111111][hidden link]]\n#+end_comment\n\nvisible text\n"
+	got, err := Render(src, resolverFor("11111111-1111-4111-8111-111111111111"))
+	if err != nil {
+		t.Fatalf("Render: %v", err)
+	}
+	if strings.Contains(got, "secret") || strings.Contains(got, "hidden link") {
+		t.Fatalf("comment block content must not be rendered: %s", got)
+	}
+	if !strings.Contains(got, "visible text") {
+		t.Fatalf("content outside the comment block must still render: %s", got)
+	}
+}
+
+// TestRenderQuoteBlockLinkIsFollowable: links inside quote blocks are real
+// links — the renderer must produce an in-app anchor for them, matching the
+// indexer which counts them as edges.
+func TestRenderQuoteBlockLinkIsFollowable(t *testing.T) {
+	src := "#+begin_quote\nQuoting [[id:11111111-1111-4111-8111-111111111111][a note]].\n#+end_quote\n"
+	got, err := Render(src, resolverFor("11111111-1111-4111-8111-111111111111"))
+	if err != nil {
+		t.Fatalf("Render: %v", err)
+	}
+	if !strings.Contains(got, `href="#/note/11111111-1111-4111-8111-111111111111"`) {
+		t.Fatalf("quote block link should render as an in-app anchor: %s", got)
+	}
+}
+
 func TestRenderFileLinkIsInert(t *testing.T) {
 	src := "[[file:../images/diagram.png][diagram]]"
 	got, err := Render(src, resolverFor())

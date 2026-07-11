@@ -25,14 +25,17 @@ type Node struct {
 	// Source is the raw org markup for this node: the whole file for a file
 	// node, or the heading's subtree (from its headline to the next headline
 	// of level <= its own) for a heading node. It is what gets rendered to
-	// HTML for /api/note/{id}.
+	// HTML for /api/note/{id}. Heading node sources are substrings of the
+	// file node's Source (they share one backing array), so nested ID
+	// subtrees don't multiply retained memory.
 	Source string
 
 	// Body is Source with property drawers and #+keyword: lines stripped,
 	// used as the text /api/search matches against and extracts snippets
 	// from. Keeping it separate from Source means search results and
 	// snippets surface actual note prose instead of :ID:/:ROAM_REFS:/
-	// #+title: metadata.
+	// #+title: metadata. Like Source, every node's Body is a slice of a
+	// single per-file string.
 	Body string
 
 	// Links holds the raw id: link targets found in this node's content, in

@@ -7,35 +7,56 @@ export type Route =
   | { type: "graph" }
   | { type: "graph-local"; id: string };
 
+/** decodeURIComponent that returns null instead of throwing on bad input. */
+function safeDecode(s: string): string | null {
+  try {
+    return decodeURIComponent(s);
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Parse a location hash (with or without the leading "#") into a Route.
- * Unknown shapes fall back to "empty" rather than throwing, so a stray or
- * hand-edited URL never crashes the app.
+ *
+ * Everything after "#/note/" (or "#/graph/") is treated as ONE
+ * percent-encoded segment: the full remainder of the hash is taken verbatim
+ * and then decoded. This keeps ids containing "/" working — the renderer
+ * emits them percent-encoded (e.g. "#/note/area%2Fproject") — and a raw,
+ * unencoded "/" in the remainder simply folds into the id rather than
+ * being split into extra path segments.
+ *
+ * Unknown shapes and malformed percent-encoding (e.g. "#/note/%") fall back
+ * to "empty" rather than throwing, so a stray or hand-edited URL never
+ * crashes init or hashchange handling.
  */
 export function parseHash(hash: string): Route {
   let h = hash.startsWith("#") ? hash.slice(1) : hash;
-  // Normalize leading slash: "/note/x" -> ["note", "x"]
+  // Normalize leading slash: "/note/x" -> "note/x"
   if (h.startsWith("/")) h = h.slice(1);
   if (h === "") return { type: "empty" };
 
-  const parts = h.split("/").filter((p) => p.length > 0);
+  if (h === "graph" || h === "graph/") return { type: "graph" };
 
-  if (parts[0] === "graph") {
-    if (parts.length === 1) return { type: "graph" };
-    if (parts.length >= 2 && parts[1]) {
-      return { type: "graph-local", id: decodeURIComponent(parts[1]) };
-    }
-    return { type: "empty" };
+  if (h.startsWith("graph/")) {
+    const id = safeDecode(h.slice("graph/".length));
+    return id ? { type: "graph-local", id } : { type: "empty" };
   }
 
-  if (parts[0] === "note" && parts.length >= 2 && parts[1]) {
-    return { type: "note", id: decodeURIComponent(parts[1]) };
+  if (h.startsWith("note/")) {
+    const id = safeDecode(h.slice("note/".length));
+    return id ? { type: "note", id } : { type: "empty" };
   }
 
   return { type: "empty" };
 }
 
-/** Format a Route back into a location hash, e.g. "#/note/<id>". */
+/**
+ * Format a Route back into a location hash, e.g. "#/note/<id>". The id is
+ * percent-encoded as a single segment, symmetric with parseHash, so
+ * parseHash(formatRoute(r)) round-trips for any id — including ones
+ * containing "/", spaces, or "%".
+ */
 export function formatRoute(route: Route): string {
   switch (route.type) {
     case "note":

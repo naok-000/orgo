@@ -16,16 +16,20 @@ var (
 	filetagsKeywRe = regexp.MustCompile(`(?i)^#\+filetags:\s*(.*)$`)
 	headingTagsRe  = regexp.MustCompile(`^(.*?)\s+:([A-Za-z0-9_@#%:]+):\s*$`)
 	idLinkRe       = regexp.MustCompile(`\[\[id:([^][]+)\]`)
+	// planningRe matches org planning lines (SCHEDULED:/DEADLINE:/CLOSED:),
+	// which org places between a headline and its property drawer. Node
+	// detection must skip over them to find the drawer.
+	planningRe = regexp.MustCompile(`(?i)^\s*(SCHEDULED|DEADLINE|CLOSED):`)
 	// verbatimSpanRe matches org's single-line verbatim/code emphasis
 	// (=literal= and ~literal~). Their contents are literal text, not
 	// parsed markup, so an "id:" link-looking string inside one (e.g. an
 	// example like "links look like =[[id:...]]=") must not be scanned for
 	// links.
 	verbatimSpanRe = regexp.MustCompile(`=[^=\t\n]+=|~[^~\t\n]+~`)
-	blockBeginRe   = regexp.MustCompile(`(?i)^\s*#\+begin_\S+`)
-	blockEndRe     = regexp.MustCompile(`(?i)^\s*#\+end_\S+`)
+	blockBeginRe   = regexp.MustCompile(`(?i)^\s*#\+begin_(\S+)`)
+	blockEndRe     = regexp.MustCompile(`(?i)^\s*#\+end_(\S+)`)
 	// drawerStartAnyRe matches the start of any drawer, not just
-	// :PROPERTIES: (e.g. :LOGBOOK:). It's only used by bodyText to keep
+	// :PROPERTIES: (e.g. :LOGBOOK:). It's only used by buildBody to keep
 	// drawer contents out of search text; node parsing itself only ever
 	// looks for :PROPERTIES: specifically.
 	drawerStartAnyRe = regexp.MustCompile(`(?i)^\s*:[A-Za-z][A-Za-z0-9_+-]*:\s*$`)
@@ -41,15 +45,36 @@ var (
 // anywhere (no file-level property drawer with :ID:, and no heading with its
 // own :ID:) yields no nodes at all, per org-roam's own semantics.
 func ParseFile(relPath string, content []byte, modTime time.Time) []*Node {
-	lines := splitLines(string(content))
+	text := strings.ReplaceAll(string(content), "\r\n", "\n")
+	lines := strings.Split(text, "\n")
 	n := len(lines)
-	inBlock := blockRegions(lines)
+
+	// lineOff[i] is the byte offset of the start of lines[i] within text;
+	// lineOff[n] is len(text)+1 (as if a final "\n" existed). Node sources
+	// are produced by slicing text with these offsets rather than copying,
+	// so every node of a file shares one backing array and retained memory
+	// stays O(file) even for deeply nested ID subtrees.
+	lineOff := make([]int, n+1)
+	for i, l := range lines {
+		lineOff[i+1] = lineOff[i] + len(l) + 1
+	}
+	sourceSlice := func(from, to int) string {
+		start, end := lineOff[from], lineOff[to]-1
+		if end > len(text) {
+			end = len(text)
+		}
+		if end < start {
+			end = start
+		}
+		return text[start:end]
+	}
+
+	literal := literalRegions(lines)
 
 	firstHeading := n
-	headingIdxs := make([]int, 0)
-	headingLevels := make([]int, 0)
+	var headingIdxs, headingLevels []int
 	for i, l := range lines {
-		if inBlock[i] {
+		if literal[i] {
 			continue
 		}
 		if m := headlineRe.FindStringSubmatch(l); m != nil {
@@ -66,6 +91,11 @@ func ParseFile(relPath string, content []byte, modTime time.Time) []*Node {
 		fileTitle = titleFromFilename(relPath)
 	}
 
+	bodyAll, bodyOff := buildBody(lines)
+	bodySlice := func(from, to int) string {
+		return strings.TrimSuffix(bodyAll[bodyOff[from]:bodyOff[to]], "\n")
+	}
+
 	var nodes []*Node
 	nodeByID := map[string]*Node{}
 
@@ -78,8 +108,8 @@ func ParseFile(relPath string, content []byte, modTime time.Time) []*Node {
 			Aliases: fileAliases,
 			Refs:    fileRefs,
 			File:    relPath,
-			Source:  string(content),
-			Body:    bodyText(lines),
+			Source:  text,
+			Body:    bodySlice(0, n),
 			ModTime: modTime,
 			Pos:     1,
 		}
@@ -90,6 +120,7 @@ func ParseFile(relPath string, content []byte, modTime time.Time) []*Node {
 	type frame struct {
 		level  int
 		nodeID string
+		tags   []string
 	}
 	var stack []frame
 	nearest := fileID
@@ -105,10 +136,16 @@ func ParseFile(relPath string, content []byte, modTime time.Time) []*Node {
 			m := headlineRe.FindStringSubmatch(lines[i])
 			title, tags := splitHeadingTags(m[2])
 
+			// The property drawer may be separated from the headline by
+			// planning lines (SCHEDULED:/DEADLINE:/CLOSED:); skip them.
 			id := ""
 			var props map[string]string
-			if i+1 < n && propStartRe.MatchString(lines[i+1]) {
-				props, _ = parsePropertyDrawer(lines, i+1)
+			j := i + 1
+			for j < n && planningRe.MatchString(lines[j]) {
+				j++
+			}
+			if j < n && propStartRe.MatchString(lines[j]) {
+				props, _ = parsePropertyDrawer(lines, j)
 				id = strings.TrimSpace(props["ID"])
 			}
 
@@ -120,16 +157,23 @@ func ParseFile(relPath string, content []byte, modTime time.Time) []*Node {
 						break
 					}
 				}
+				// Org tag inheritance: file tags, then the tags of every
+				// ancestor headline (whether or not it is itself a node),
+				// then the heading's own tags.
+				var ancestorTags []string
+				for _, f := range stack {
+					ancestorTags = append(ancestorTags, f.tags...)
+				}
 				nd := &Node{
 					ID:      id,
 					Title:   strings.TrimSpace(title),
 					Level:   level,
-					Tags:    unionTags(fileTags, tags),
+					Tags:    unionTags(fileTags, ancestorTags, tags),
 					Aliases: splitOrgWords(props["ROAM_ALIASES"]),
 					Refs:    strings.Fields(props["ROAM_REFS"]),
 					File:    relPath,
-					Source:  strings.Join(lines[i:end], "\n"),
-					Body:    bodyText(lines[i:end]),
+					Source:  sourceSlice(i, end),
+					Body:    bodySlice(i, end),
 					ModTime: modTime,
 					Pos:     i + 1,
 				}
@@ -145,77 +189,119 @@ func ParseFile(relPath string, content []byte, modTime time.Time) []*Node {
 					newNearest = fileID
 				}
 			}
-			stack = append(stack, frame{level: level, nodeID: newNearest})
+			stack = append(stack, frame{level: level, nodeID: newNearest, tags: tags})
 			nearest = newNearest
 			hPos++
+
+			// Links in the headline text itself belong to this heading's
+			// nearest node (the heading itself when it is a node).
+			if nd, ok := nodeByID[nearest]; ok {
+				for _, lm := range idLinkRe.FindAllStringSubmatch(stripVerbatim(m[2]), -1) {
+					nd.Links = append(nd.Links, strings.TrimSpace(lm[1]))
+				}
+			}
 			continue
 		}
 
-		if nearest == "" || inBlock[i] {
+		if nearest == "" || literal[i] {
 			continue
 		}
 		nd, ok := nodeByID[nearest]
 		if !ok {
 			continue
 		}
-		for _, m := range idLinkRe.FindAllStringSubmatch(stripVerbatim(lines[i]), -1) {
-			nd.Links = append(nd.Links, strings.TrimSpace(m[1]))
+		for _, lm := range idLinkRe.FindAllStringSubmatch(stripVerbatim(lines[i]), -1) {
+			nd.Links = append(nd.Links, strings.TrimSpace(lm[1]))
 		}
 	}
 
 	return nodes
 }
 
-// blockRegions reports, for every line, whether it falls inside a
-// #+begin_.../#+end_... block (SRC, EXAMPLE, QUOTE, ...), inclusive of the
-// begin/end marker lines themselves. Block content is raw/literal in org
-// (most obviously for SRC and EXAMPLE): it must not be scanned for
-// headlines or links, since it isn't prose.
-func blockRegions(lines []string) []bool {
-	inBlock := make([]bool, len(lines))
-	depth := 0
+// literalRegions reports, for every line, whether it lies inside a literal
+// block — src, example, export, or comment — whose contents are raw text
+// rather than org markup (inclusive of the begin/end marker lines). Only
+// those regions are excluded from headline detection and link scanning:
+// quote/center/verse and other blocks contain real org markup whose links
+// must count as edges (go-org renders them as links too, keeping the graph
+// and the rendered HTML in agreement).
+func literalRegions(lines []string) []bool {
+	lit := make([]bool, len(lines))
+	open := "" // lowercased name of the currently open literal block, if any
 	for i, l := range lines {
-		switch {
-		case blockBeginRe.MatchString(l):
-			inBlock[i] = true
-			depth++
-		case blockEndRe.MatchString(l):
-			inBlock[i] = true
-			if depth > 0 {
-				depth--
+		if m := blockBeginRe.FindStringSubmatch(l); m != nil {
+			if open != "" {
+				lit[i] = true // a begin marker inside a literal block is content
+				continue
 			}
-		default:
-			inBlock[i] = depth > 0
+			if isLiteralBlockName(m[1]) {
+				open = strings.ToLower(m[1])
+				lit[i] = true
+			}
+			continue
 		}
+		if m := blockEndRe.FindStringSubmatch(l); m != nil {
+			if open != "" {
+				lit[i] = true
+				if strings.EqualFold(m[1], open) {
+					open = ""
+				}
+			}
+			continue
+		}
+		lit[i] = open != ""
 	}
-	return inBlock
+	return lit
 }
 
-// bodyText joins lines back into text with drawers (:PROPERTIES:, :LOGBOOK:,
-// ...) and #+keyword: lines removed, so it reads as prose rather than
-// metadata. It's used for roam.Node.Body (search text), never for Source
-// (which keeps everything so it renders faithfully).
-func bodyText(lines []string) string {
-	out := make([]string, 0, len(lines))
-	i := 0
-	for i < len(lines) {
+func isLiteralBlockName(name string) bool {
+	switch strings.ToLower(name) {
+	case "src", "example", "export", "comment":
+		return true
+	default:
+		return false
+	}
+}
+
+// buildBody builds the search text for a whole file — every line except
+// drawers (:PROPERTIES:, :LOGBOOK:, ...) and #+keyword: lines, joined by
+// "\n" — plus, for every line index, its byte offset into that string.
+// Each node's Body is then sliced out of the shared string instead of
+// copied, keeping retained memory O(file). Offsets of stripped lines point
+// at the next kept content; the returned offsets slice has len(lines)+1
+// entries, the last being the total length.
+func buildBody(lines []string) (string, []int) {
+	keep := make([]bool, len(lines))
+	for i := 0; i < len(lines); {
 		line := lines[i]
 		if drawerStartAnyRe.MatchString(line) && !propEndRe.MatchString(line) {
 			j := i + 1
 			for j < len(lines) && !propEndRe.MatchString(lines[j]) {
 				j++
 			}
-			i = j + 1 // also skip the :END: line itself
+			if j < len(lines) {
+				j++ // also drop the :END: line itself
+			}
+			i = j
 			continue
 		}
-		if keywordLineRe.MatchString(line) {
-			i++
-			continue
+		if !keywordLineRe.MatchString(line) {
+			keep[i] = true
 		}
-		out = append(out, line)
 		i++
 	}
-	return strings.Join(out, "\n")
+
+	var sb strings.Builder
+	off := make([]int, len(lines)+1)
+	for i, l := range lines {
+		off[i] = sb.Len()
+		if keep[i] {
+			sb.WriteString(l)
+			sb.WriteByte('\n')
+		}
+	}
+	off[len(lines)] = sb.Len()
+	return sb.String(), off
 }
 
 // stripVerbatim blanks out org's single-line verbatim/code emphasis spans
@@ -395,9 +481,4 @@ func unionTags(lists ...[]string) []string {
 func titleFromFilename(relPath string) string {
 	base := filepath.Base(relPath)
 	return strings.TrimSuffix(base, filepath.Ext(base))
-}
-
-func splitLines(s string) []string {
-	s = strings.ReplaceAll(s, "\r\n", "\n")
-	return strings.Split(s, "\n")
 }

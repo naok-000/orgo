@@ -106,6 +106,19 @@ func run(args []string, stdout io.Writer) error {
 		return fmt.Errorf("%s is not a directory", absDir)
 	}
 
+	// Bind the port before the (potentially long) initial scan so clients —
+	// including orgo.el, which polls the port for readiness — can connect
+	// immediately; their requests queue in the accept backlog until Serve
+	// starts below.
+	ln, err := net.Listen("tcp", net.JoinHostPort(cfg.addr, strconv.Itoa(cfg.port)))
+	if err != nil {
+		return fmt.Errorf("listen: %w", err)
+	}
+	defer ln.Close()
+
+	url := fmt.Sprintf("http://%s/", ln.Addr().String())
+	log.Printf("orgo: listening at %s", url)
+
 	idx, err := roam.Scan(absDir)
 	if err != nil {
 		return fmt.Errorf("scanning %s: %w", absDir, err)
@@ -113,6 +126,11 @@ func run(args []string, stdout io.Writer) error {
 	log.Printf("orgo: indexed %d notes from %s", idx.NoteCount(), absDir)
 
 	srv := server.New(idx, version)
+	if tcpAddr, ok := ln.Addr().(*net.TCPAddr); ok {
+		// DNS-rebinding protection: only expected Host headers are served
+		// when bound to loopback (the default).
+		srv.RestrictHost(cfg.addr, tcpAddr.Port)
+	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -134,12 +152,6 @@ func run(args []string, stdout io.Writer) error {
 		return fmt.Errorf("watcher: %w", err)
 	}
 
-	ln, err := net.Listen("tcp", net.JoinHostPort(cfg.addr, strconv.Itoa(cfg.port)))
-	if err != nil {
-		return fmt.Errorf("listen: %w", err)
-	}
-
-	url := fmt.Sprintf("http://%s/", ln.Addr().String())
 	log.Printf("orgo: serving %s at %s", absDir, url)
 
 	httpServer := &http.Server{Handler: srv}

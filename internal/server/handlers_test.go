@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/naok-000/orgo/internal/roam"
@@ -180,6 +181,15 @@ func TestHandleNoteHeadingSubtree(t *testing.T) {
 	}
 	if note.Level != 1 {
 		t.Errorf("level = %d, want 1", note.Level)
+	}
+	// The subtree's nested subheading must render (the node's Source is a
+	// slice of the file content covering the whole subtree)...
+	if !strings.Contains(note.HTML, "Use-package") {
+		t.Errorf("subtree HTML should include the nested Use-package heading:\n%s", note.HTML)
+	}
+	// ...but the sibling heading after the subtree must not.
+	if strings.Contains(note.HTML, "Keybindings") {
+		t.Errorf("subtree HTML must stop before the sibling Keybindings heading:\n%s", note.HTML)
 	}
 }
 

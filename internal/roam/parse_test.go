@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unsafe"
 )
 
 func nodeByID(t *testing.T, nodes []*Node, id string) *Node {
@@ -312,6 +313,259 @@ Body.
 	}
 	if !stringSlicesEqual(elisp.Tags, []string{"tools", "lang", "fun"}) {
 		t.Errorf("tags = %v, want [tools lang fun]", elisp.Tags)
+	}
+}
+
+// TestParseFileHeadingDrawerAfterPlanningLines: org places planning lines
+// (SCHEDULED:/DEADLINE:/CLOSED:) between a headline and its property drawer;
+// a node must still be detected.
+func TestParseFileHeadingDrawerAfterPlanningLines(t *testing.T) {
+	src := `:PROPERTIES:
+:ID:       root-1111-4111-8111-111111111111
+:END:
+#+title: Root
+
+* Project
+DEADLINE: <2026-08-01 Sat>
+:PROPERTIES:
+:ID:       proj-1111-4111-8111-111111111111
+:END:
+
+Project body linking to [[id:root-1111-4111-8111-111111111111][Root]].
+
+* Scheduled and closed
+SCHEDULED: <2026-08-02 Sun>
+CLOSED: [2026-08-03 Mon]
+:PROPERTIES:
+:ID:       sch-11111-4111-8111-111111111111
+:END:
+
+Body.
+`
+	nodes := ParseFile("f.org", []byte(src), time.Now())
+	proj := nodeByID(t, nodes, "proj-1111-4111-8111-111111111111")
+	if proj.Level != 1 || proj.Title != "Project" {
+		t.Errorf("Project node = level %d title %q, want level 1 title Project", proj.Level, proj.Title)
+	}
+	if len(proj.Links) != 1 || proj.Links[0] != "root-1111-4111-8111-111111111111" {
+		t.Errorf("Project links = %v, want the body link attributed to it", proj.Links)
+	}
+	// Multiple stacked planning lines before the drawer must also work.
+	sch := nodeByID(t, nodes, "sch-11111-4111-8111-111111111111")
+	if sch.Title != "Scheduled and closed" {
+		t.Errorf("title = %q", sch.Title)
+	}
+}
+
+// TestParseFileLinksInHeadlineText: a link inside headline text belongs to
+// that heading's node (or the enclosing node if the heading isn't one).
+func TestParseFileLinksInHeadlineText(t *testing.T) {
+	src := `:PROPERTIES:
+:ID:       file-1111-4111-8111-111111111111
+:END:
+#+title: F
+
+* Discussing [[id:tgt1-1111-4111-8111-111111111111][T1]] here
+:PROPERTIES:
+:ID:       head-1111-4111-8111-111111111111
+:END:
+
+Body.
+
+* Also [[id:tgt2-1111-4111-8111-111111111111][T2]] in a non-node heading
+
+More prose.
+`
+	nodes := ParseFile("f.org", []byte(src), time.Now())
+	head := nodeByID(t, nodes, "head-1111-4111-8111-111111111111")
+	if len(head.Links) != 1 || head.Links[0] != "tgt1-1111-4111-8111-111111111111" {
+		t.Errorf("heading node links = %v, want its own headline link", head.Links)
+	}
+	file := nodeByID(t, nodes, "file-1111-4111-8111-111111111111")
+	if len(file.Links) != 1 || file.Links[0] != "tgt2-1111-4111-8111-111111111111" {
+		t.Errorf("file node links = %v, want the non-node headline's link", file.Links)
+	}
+}
+
+// TestParseFileLinksInNonLiteralBlocksCounted: quote/center/verse blocks
+// contain real org markup — links inside them must produce edges (go-org
+// renders them as links too).
+func TestParseFileLinksInNonLiteralBlocksCounted(t *testing.T) {
+	src := `:PROPERTIES:
+:ID:       file-1111-4111-8111-111111111111
+:END:
+#+title: F
+
+#+begin_quote
+Quoting [[id:tgt1-1111-4111-8111-111111111111][T1]].
+#+end_quote
+
+#+begin_center
+Centered [[id:tgt2-1111-4111-8111-111111111111][T2]].
+#+end_center
+
+#+begin_verse
+Verse [[id:tgt3-1111-4111-8111-111111111111][T3]].
+#+end_verse
+`
+	nodes := ParseFile("f.org", []byte(src), time.Now())
+	file := nodeByID(t, nodes, "file-1111-4111-8111-111111111111")
+	want := []string{
+		"tgt1-1111-4111-8111-111111111111",
+		"tgt2-1111-4111-8111-111111111111",
+		"tgt3-1111-4111-8111-111111111111",
+	}
+	if !stringSlicesEqual(file.Links, want) {
+		t.Errorf("links = %v, want %v (links in quote/center/verse must count)", file.Links, want)
+	}
+}
+
+// TestParseFileLinksInLiteralBlocksIgnored: src/example/export/comment block
+// contents are raw text; link-looking strings there must not become edges.
+func TestParseFileLinksInLiteralBlocksIgnored(t *testing.T) {
+	src := `:PROPERTIES:
+:ID:       file-1111-4111-8111-111111111111
+:END:
+#+title: F
+
+#+begin_src org
+[[id:src1-1111-4111-8111-111111111111][in src]]
+#+end_src
+
+#+begin_example
+[[id:ex11-1111-4111-8111-111111111111][in example]]
+#+end_example
+
+#+begin_export html
+[[id:exp1-1111-4111-8111-111111111111][in export]]
+#+end_export
+
+#+begin_comment
+[[id:cmt1-1111-4111-8111-111111111111][in comment]]
+#+end_comment
+
+A real [[id:real-1111-4111-8111-111111111111][link]] outside blocks.
+`
+	nodes := ParseFile("f.org", []byte(src), time.Now())
+	file := nodeByID(t, nodes, "file-1111-4111-8111-111111111111")
+	if !stringSlicesEqual(file.Links, []string{"real-1111-4111-8111-111111111111"}) {
+		t.Errorf("links = %v, want only the link outside literal blocks", file.Links)
+	}
+}
+
+// TestParseFileAncestorHeadingTagInheritance: org's default tag inheritance
+// flows down the outline — a heading node inherits tags from every ancestor
+// headline (node or not), plus filetags, plus its own.
+func TestParseFileAncestorHeadingTagInheritance(t *testing.T) {
+	src := `:PROPERTIES:
+:ID:       file-1111-4111-8111-111111111111
+:END:
+#+title: F
+#+filetags: :ft:
+
+* Project :work:
+
+** Decision
+:PROPERTIES:
+:ID:       decn-1111-4111-8111-111111111111
+:END:
+
+Body.
+
+** Meeting :sync:
+:PROPERTIES:
+:ID:       meet-1111-4111-8111-111111111111
+:END:
+
+*** Detail
+:PROPERTIES:
+:ID:       detl-1111-4111-8111-111111111111
+:END:
+
+Deep body.
+
+* Elsewhere :other:
+
+** Unrelated
+:PROPERTIES:
+:ID:       unrl-1111-4111-8111-111111111111
+:END:
+
+Text.
+`
+	nodes := ParseFile("f.org", []byte(src), time.Now())
+
+	decision := nodeByID(t, nodes, "decn-1111-4111-8111-111111111111")
+	if !stringSlicesEqual(decision.Tags, []string{"ft", "work"}) {
+		t.Errorf("Decision tags = %v, want [ft work] (inherited from file + ancestor heading)", decision.Tags)
+	}
+
+	detail := nodeByID(t, nodes, "detl-1111-4111-8111-111111111111")
+	if !stringSlicesEqual(detail.Tags, []string{"ft", "work", "sync"}) {
+		t.Errorf("Detail tags = %v, want [ft work sync] (inherited through two ancestor levels)", detail.Tags)
+	}
+
+	// Sibling subtree tags must NOT leak across.
+	unrelated := nodeByID(t, nodes, "unrl-1111-4111-8111-111111111111")
+	if !stringSlicesEqual(unrelated.Tags, []string{"ft", "other"}) {
+		t.Errorf("Unrelated tags = %v, want [ft other] (no leakage from the Project subtree)", unrelated.Tags)
+	}
+}
+
+// TestParseFileNestedHeadingSourcesShareFileBacking guards the O(file)
+// retained-memory property: heading node Source strings must be slices of
+// the file node's Source, not copies.
+func TestParseFileNestedHeadingSourcesShareFileBacking(t *testing.T) {
+	src := `:PROPERTIES:
+:ID:       file-1111-4111-8111-111111111111
+:END:
+#+title: F
+
+* A
+:PROPERTIES:
+:ID:       aaaa-1111-4111-8111-111111111111
+:END:
+
+A body.
+
+** B
+:PROPERTIES:
+:ID:       bbbb-1111-4111-8111-111111111111
+:END:
+
+B body.
+
+*** C
+:PROPERTIES:
+:ID:       cccc-1111-4111-8111-111111111111
+:END:
+
+C body.
+`
+	nodes := ParseFile("f.org", []byte(src), time.Now())
+	file := nodeByID(t, nodes, "file-1111-4111-8111-111111111111")
+	base := uintptr(unsafe.Pointer(unsafe.StringData(file.Source)))
+	limit := base + uintptr(len(file.Source))
+	for _, id := range []string{
+		"aaaa-1111-4111-8111-111111111111",
+		"bbbb-1111-4111-8111-111111111111",
+		"cccc-1111-4111-8111-111111111111",
+	} {
+		nd := nodeByID(t, nodes, id)
+		p := uintptr(unsafe.Pointer(unsafe.StringData(nd.Source)))
+		if p < base || p+uintptr(len(nd.Source)) > limit {
+			t.Errorf("node %s Source is a copy, not a slice of the file content", id)
+		}
+	}
+
+	// And the nested subtree content must still be correct.
+	a := nodeByID(t, nodes, "aaaa-1111-4111-8111-111111111111")
+	if !containsAll(a.Source, "* A", "A body.", "** B", "B body.", "*** C", "C body.") {
+		t.Errorf("A subtree source incomplete:\n%s", a.Source)
+	}
+	c := nodeByID(t, nodes, "cccc-1111-4111-8111-111111111111")
+	if !containsAll(c.Source, "*** C", "C body.") || strings.Contains(c.Source, "B body.") {
+		t.Errorf("C subtree source wrong:\n%s", c.Source)
 	}
 }
 
