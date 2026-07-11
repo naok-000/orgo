@@ -1,0 +1,16 @@
+:PROPERTIES:
+:ID:       44444444-4444-4444-8444-444444444444
+:ROAM_ALIASES: "roam" "my zettelkasten tool"
+:END:
+#+title: org-roam
+#+filetags: :tools:pkm:
+
+A plain-text personal knowledge management system on top of
+[[id:33333333-3333-4333-8333-333333333333][Emacs]] org-mode, implementing the
+[[id:77777777-7777-4777-8777-777777777777][Zettelkasten]] method.
+
+- backed by a SQLite database
+- nodes are files or headings with an =:ID:= property
+- links look like =[[id:...]]=
+
+See also [[https://www.orgroam.com/][the website]].

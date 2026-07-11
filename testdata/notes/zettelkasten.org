@@ -1,0 +1,16 @@
+:PROPERTIES:
+:ID:       77777777-7777-4777-8777-777777777777
+:ROAM_REFS: https://en.wikipedia.org/wiki/Zettelkasten
+:END:
+#+title: Zettelkasten
+#+filetags: :pkm:
+
+A note-taking method built on small, densely linked notes.
+Popularized by Niklas Luhmann; implemented for me by
+[[id:44444444-4444-4444-8444-444444444444][org-roam]].
+
+Key ideas:
+
+1. one idea per note
+2. link liberally
+3. write in your own words

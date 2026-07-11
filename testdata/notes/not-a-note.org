@@ -1,0 +1,4 @@
+#+title: Not an org-roam note
+
+This file has no :ID: property, so it is not an org-roam node.
+Indexers should skip it (org-roam only tracks files with IDs).

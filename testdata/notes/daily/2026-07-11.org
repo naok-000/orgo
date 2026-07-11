@@ -1,0 +1,8 @@
+:PROPERTIES:
+:ID:       aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa
+:END:
+#+title: 2026-07-11
+#+filetags: :daily:
+
+Worked on the [[id:55555555-5555-4555-8555-555555555555][orgo project]] today.
+Learned a trick in [[id:66666666-6666-4666-8666-666666666666][Elisp]].

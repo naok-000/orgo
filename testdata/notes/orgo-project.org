@@ -1,0 +1,24 @@
+:PROPERTIES:
+:ID:       55555555-5555-4555-8555-555555555555
+:END:
+#+title: orgo project
+#+filetags: :dev:project:
+
+A browser for [[id:44444444-4444-4444-8444-444444444444][org-roam]] notes,
+written in [[id:22222222-2222-4222-8222-222222222222][Go]].
+
+* Goals
+
+- follow =id:= links in the browser
+- visualize the link graph
+- tabbed reading, like k1LoW/mo
+
+* Non-goals
+
+- editing notes (Emacs does that)
+
+* Scratch
+
+A link to a node that does not exist: [[id:99999999-9999-4999-8999-999999999999][ghost note]].
+
+An inline verbatim: ~orgo ~/org-roam~ and *bold* and /italic/ text.

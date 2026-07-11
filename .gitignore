@@ -1,0 +1,18 @@
+# direnv
+.direnv/
+
+# Go
+/orgo
+*.test
+coverage.out
+
+# Node
+node_modules/
+
+# Editors
+*~
+\#*\#
+.DS_Store
+
+# Claude local settings
+.claude/settings.local.json

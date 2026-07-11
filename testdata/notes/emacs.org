@@ -1,0 +1,24 @@
+:PROPERTIES:
+:ID:       33333333-3333-4333-8333-333333333333
+:END:
+#+title: Emacs
+#+filetags: :tools:
+
+The extensible, self-documenting editor. My notes live in
+[[id:44444444-4444-4444-8444-444444444444][org-roam]].
+
+* Elisp
+:PROPERTIES:
+:ID:       66666666-6666-4666-8666-666666666666
+:END:
+
+Emacs Lisp is how you extend [[id:33333333-3333-4333-8333-333333333333][Emacs]].
+It is also a fine first Lisp.
+
+** Use-package
+
+=use-package= declarations keep configuration tidy.
+
+* Keybindings
+
+Nothing here links anywhere.
