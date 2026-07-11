@@ -39,6 +39,8 @@
 
 (require 'browse-url)
 
+(declare-function org-entry-get "org" (epom property &optional inherit literal-nil))
+
 (defgroup orgo nil
   "Browse org-roam notes in the browser."
   :group 'org
@@ -129,6 +131,7 @@ Signals an error when the binary cannot be found."
   (interactive)
   (unless (derived-mode-p 'org-mode)
     (user-error "Not in an org buffer"))
+  (require 'org)
   (let ((id (org-entry-get nil "ID" t)))
     (unless id
       (user-error "No :ID: property found at point or above"))
