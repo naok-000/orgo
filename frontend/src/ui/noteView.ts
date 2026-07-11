@@ -1,5 +1,6 @@
 import type { Backlink, NoteDetail } from "../types.ts";
 import { el, clear } from "./dom.ts";
+import { renderMathIn } from "./math.ts";
 
 export interface NoteViewCallbacks {
   onShowInGraph: (id: string) => void;
@@ -63,6 +64,7 @@ export class NoteView {
 
     // note.html is trusted, server-sanitized HTML per docs/DESIGN.md.
     const body = el("div", { className: "note-body org-content", html: note.html });
+    renderMathIn(body);
 
     this.root.append(header, body, this.renderBacklinks(note.backlinks));
   }

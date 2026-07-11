@@ -15,6 +15,10 @@ export interface ReadingPrefs {
 
 export interface GraphPrefs {
   depth: GraphDepth;
+  /** Multiplier on the drawn node radius. */
+  nodeScale: number;
+  /** Link stroke width in px. */
+  linkWidth: number;
 }
 
 export const DEFAULT_READING_PREFS: ReadingPrefs = {
@@ -22,7 +26,15 @@ export const DEFAULT_READING_PREFS: ReadingPrefs = {
   fontSize: "m",
 };
 
-export const DEFAULT_GRAPH_PREFS: GraphPrefs = { depth: 1 };
+export const DEFAULT_GRAPH_PREFS: GraphPrefs = {
+  depth: 1,
+  nodeScale: 1,
+  linkWidth: 1,
+};
+
+/** Slider ranges — sanitizeGraphPrefs clamps to these, the UI mirrors them. */
+export const NODE_SCALE_RANGE = { min: 0.5, max: 2 } as const;
+export const LINK_WIDTH_RANGE = { min: 0.5, max: 3 } as const;
 
 /** Pure: resolve the initial theme from persisted value + OS preference. */
 export function resolveInitialTheme(
@@ -52,10 +64,32 @@ export function sanitizeReadingPrefs(data: unknown): ReadingPrefs {
   };
 }
 
+/** Clamp v into [min, max] when it is a finite number; else the default. */
+function clampNumber(
+  v: unknown,
+  range: { min: number; max: number },
+  fallback: number,
+): number {
+  if (typeof v !== "number" || !Number.isFinite(v)) return fallback;
+  return Math.min(range.max, Math.max(range.min, v));
+}
+
 export function sanitizeGraphPrefs(data: unknown): GraphPrefs {
   if (!data || typeof data !== "object") return { ...DEFAULT_GRAPH_PREFS };
   const d = data as Partial<GraphPrefs>;
-  return { depth: d.depth === 2 ? 2 : 1 };
+  return {
+    depth: d.depth === 2 ? 2 : 1,
+    nodeScale: clampNumber(
+      d.nodeScale,
+      NODE_SCALE_RANGE,
+      DEFAULT_GRAPH_PREFS.nodeScale,
+    ),
+    linkWidth: clampNumber(
+      d.linkWidth,
+      LINK_WIDTH_RANGE,
+      DEFAULT_GRAPH_PREFS.linkWidth,
+    ),
+  };
 }
 
 export class PreferencesStore {
@@ -95,7 +129,9 @@ export class PreferencesStore {
   }
 
   setGraph(prefs: Partial<GraphPrefs>): void {
-    this.graph = { ...this.graph, ...prefs };
+    // Sanitize the merged result, not just what came from localStorage, so
+    // the store invariant (clamped, finite numbers) holds for callers too.
+    this.graph = sanitizeGraphPrefs({ ...this.graph, ...prefs });
     this.storage.setJSON("graph", this.graph);
   }
 }

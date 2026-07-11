@@ -1,0 +1,7 @@
+/* Long display-math equations (\[...\], $$...$$, \begin{align}...) can be
+   wider than the note body; scroll horizontally instead of overflowing or
+   wrapping mid-formula. */
+.katex-display {
+  overflow-x: auto;
+  overflow-y: hidden;
+}

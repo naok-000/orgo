@@ -23,6 +23,13 @@ as a standalone Go binary with an embedded web frontend.
   are rewritten to in-app links (`#/note/<id>`). Output is sanitized with
   bluemonday (UGC policy + classes for code highlighting) — go-org passes
   raw HTML export blocks through, and notes may come from untrusted sources.
+- **LaTeX math renders client-side with KaTeX** (bundled via npm, no CDN).
+  go-org passes LaTeX fragments through as escaped text, which survives
+  sanitization; the SPA runs KaTeX auto-render over the note body with
+  KaTeX's default delimiters (`$$…$$`, `\(…\)`, `\[…\]`, `\begin{equation}`
+  and friends) plus single-`$` inline math (listed after `$$` so the longer
+  delimiter wins). `throwOnError: false`, `trust: false`; `pre`/`code`
+  contents are never typeset. Literal dollars can be escaped as `\$`.
 - **Live reload via SSE** (`/api/events`), fsnotify + debounce re-index.
 - **Frontend is a single-page app** built with Vite + TypeScript; built assets
   are committed under `internal/server/dist/` so plain `go install` works.
@@ -30,7 +37,7 @@ as a standalone Go binary with an embedded web frontend.
   `force-graph` (same family org-roam-ui uses).
 - **mo UX subset we adopt:** tabs (open/switch/close, persisted), sidebar note
   list, full-text search (Ctrl-K palette), dark/light theme, live reload,
-  content width/font-size controls. We deliberately skip mo's daemon/session/
+  content width/font-size controls, LaTeX math rendering. We deliberately skip mo's daemon/session/
   group model: orgo serves exactly one org-roam directory per process,
   loopback-only by default.
 - **Emacs entry point:** `orgo.el` (installable via `use-package :vc`)
@@ -64,6 +71,14 @@ orgo [flags] [dir]        # dir defaults to .
 - `#/note/<id>` — the *active* note. The URL represents the active node, not
   the whole tab set; back/forward switches the active tab naturally.
 - `#/graph` — global graph; `#/graph/<id>` — local neighborhood of a node.
+  In local mode the controls overlay shows a filter chip ("Filtered:
+  <title> · depth N") with a "Show full graph" button back to `#/graph`;
+  navigation pushes history, so browser Back returns to the filtered view.
+- Graph sizing: force-graph's `nodeVal` is area-proportional, so the drawn
+  radius is `baseNodeRadius(nlinks) * nodeScale` with `nodeVal = r²` —
+  degree-scaled and capped so hubs never dwarf the graph. Node size and
+  link width are user-adjustable sliders, persisted (clamped, finite) in
+  graph preferences.
 - Following an in-note link or double-clicking a graph node focuses an
   existing tab for that id or opens a new one. Single-click on a graph node
   selects/highlights only — selection never mutates tabs.

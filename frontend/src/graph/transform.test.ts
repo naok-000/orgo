@@ -1,9 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
+  baseNodeRadius,
   localNeighborhood,
   neighborIds,
   nodeHasTags,
-  nodeRadius,
+  nodeVal,
   toForceGraphData,
 } from "./transform.ts";
 import type { GraphNode, GraphResponse } from "../types.ts";
@@ -46,15 +47,43 @@ describe("toForceGraphData", () => {
   });
 });
 
-describe("nodeRadius", () => {
-  it("grows with nlinks but never shrinks below the base size", () => {
-    expect(nodeRadius(0)).toBeGreaterThan(0);
-    expect(nodeRadius(4)).toBeGreaterThan(nodeRadius(0));
-    expect(nodeRadius(16)).toBeGreaterThan(nodeRadius(4));
+describe("baseNodeRadius", () => {
+  it("is 2 for a node with no links", () => {
+    expect(baseNodeRadius(0)).toBe(2);
+  });
+
+  it("is monotonically non-decreasing in nlinks", () => {
+    const samples = [0, 1, 2, 3, 4, 5, 9, 16, 25, 44, 45, 100, 1000];
+    for (let i = 1; i < samples.length; i++) {
+      expect(baseNodeRadius(samples[i]!)).toBeGreaterThanOrEqual(
+        baseNodeRadius(samples[i - 1]!),
+      );
+    }
+  });
+
+  it("caps at 8 for heavily linked nodes", () => {
+    expect(baseNodeRadius(45)).toBe(8);
+    expect(baseNodeRadius(100)).toBe(8);
+    expect(baseNodeRadius(10_000)).toBe(8);
   });
 
   it("is stable for negative input (defensive)", () => {
-    expect(nodeRadius(-5)).toBe(nodeRadius(0));
+    expect(baseNodeRadius(-5)).toBe(baseNodeRadius(0));
+  });
+});
+
+describe("nodeVal", () => {
+  it("compensates for force-graph's area-proportional nodeVal: sqrt(nodeVal) is the drawn radius", () => {
+    for (const n of [0, 1, 2, 4, 5, 16, 45, 100]) {
+      expect(Math.sqrt(nodeVal(n))).toBe(baseNodeRadius(n));
+    }
+  });
+
+  it("is monotonically non-decreasing in nlinks", () => {
+    const samples = [0, 1, 3, 8, 20, 50, 200];
+    for (let i = 1; i < samples.length; i++) {
+      expect(nodeVal(samples[i]!)).toBeGreaterThanOrEqual(nodeVal(samples[i - 1]!));
+    }
   });
 });
 

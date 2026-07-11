@@ -19,6 +19,7 @@ import { Sidebar } from "./ui/sidebar.ts";
 import { TabBar } from "./ui/tabbar.ts";
 import { NoteView } from "./ui/noteView.ts";
 import { CommandPalette } from "./ui/commandPalette.ts";
+import { GraphControls, type GraphFilter } from "./ui/graphControls.ts";
 import { el, clear } from "./ui/dom.ts";
 
 const GRAPH_COLORS: Record<Theme, GraphColors> = {
@@ -46,7 +47,6 @@ const GRAPH_COLORS: Record<Theme, GraphColors> = {
 
 const WIDTH_VALUES: ContentWidth[] = ["narrow", "wide"];
 const FONT_VALUES: FontSize[] = ["s", "m", "l"];
-const DEPTH_VALUES: GraphDepth[] = [1, 2];
 
 class App {
   private storage!: NamespacedStorage;
@@ -68,18 +68,16 @@ class App {
   private tabbar!: TabBar;
   private noteView!: NoteView;
   private graphView!: GraphView;
+  private graphControls!: GraphControls;
   private palette!: CommandPalette;
 
   private graphPaneEl!: HTMLElement;
   private notePaneEl!: HTMLElement;
   private emptyPaneEl!: HTMLElement;
-  private graphDepthGroupEl!: HTMLElement;
-  private graphSelectionLabelEl!: HTMLElement;
   private connectionDotEl!: HTMLElement;
   private themeToggleBtn!: HTMLButtonElement;
   private readonly widthButtons = new Map<ContentWidth, HTMLButtonElement>();
   private readonly fontButtons = new Map<FontSize, HTMLButtonElement>();
-  private readonly depthButtons = new Map<GraphDepth, HTMLButtonElement>();
 
   async boot(): Promise<void> {
     const root = document.getElementById("app");
@@ -173,8 +171,16 @@ class App {
     );
 
     const graphCanvas = el("div", { className: "graph-canvas" });
-    const graphControls = this.buildGraphControls();
-    this.graphPaneEl = el("div", { className: "pane graph-pane" }, [graphCanvas, graphControls]);
+    this.graphControls = new GraphControls({
+      onDepthChange: (d) => this.setGraphDepth(d),
+      onStyleChange: (style) => this.setGraphStyle(style),
+      onZoomFit: () => this.graphView.zoomToFit(),
+      onShowFullGraph: () => this.navigate({ type: "graph" }),
+    });
+    this.graphPaneEl = el("div", { className: "pane graph-pane" }, [
+      graphCanvas,
+      this.graphControls.root,
+    ]);
 
     this.graphView = new GraphView(
       graphCanvas,
@@ -184,6 +190,8 @@ class App {
       },
       GRAPH_COLORS[this.prefs.getTheme()],
     );
+    this.applyGraphStyle();
+    this.renderGraphControls();
 
     this.notePaneEl = el("div", { className: "pane note-pane" }, [this.noteView.root]);
 
@@ -259,31 +267,6 @@ class App {
       el("div", { className: "brand", text: "orgo" }),
       this.tabbar.root,
       controls,
-    ]);
-  }
-
-  private buildGraphControls(): HTMLElement {
-    this.graphDepthGroupEl = el("div", { className: "btn-group graph-depth-group" });
-    for (const d of DEPTH_VALUES) {
-      const btn = el("button", { attrs: { type: "button" }, text: `Depth ${d}` }) as HTMLButtonElement;
-      btn.addEventListener("click", () => this.setGraphDepth(d));
-      this.depthButtons.set(d, btn);
-      this.graphDepthGroupEl.append(btn);
-    }
-
-    const zoomBtn = el("button", {
-      className: "graph-zoom-fit",
-      attrs: { type: "button", title: "Zoom to fit" },
-      text: "Zoom to fit",
-    });
-    zoomBtn.addEventListener("click", () => this.graphView.zoomToFit());
-
-    this.graphSelectionLabelEl = el("div", { className: "graph-selection-label" });
-
-    return el("div", { className: "graph-controls" }, [
-      this.graphDepthGroupEl,
-      zoomBtn,
-      this.graphSelectionLabelEl,
     ]);
   }
 
@@ -448,42 +431,65 @@ class App {
       const depth = this.prefs.getGraph().depth;
       data = localNeighborhood(this.fullGraph, route.id, depth);
       if (!this.fullGraph.nodes.some((n) => n.id === route.id)) missingCenter = route.id;
-      this.graphDepthGroupEl.classList.add("visible");
     } else {
       data = this.fullGraph;
-      this.graphDepthGroupEl.classList.remove("visible");
     }
 
     this.graphView.setData(data);
-    this.renderDepthButtons();
+    this.renderGraphControls();
 
-    if (missingCenter) {
-      this.graphSelectionLabelEl.textContent = `Note "${missingCenter}" not found.`;
-    } else {
-      this.graphSelectionLabelEl.textContent = "";
-    }
+    this.graphControls.setSelectionText(
+      missingCenter ? `Note "${missingCenter}" not found.` : "",
+    );
 
     requestAnimationFrame(() => this.graphView.zoomToFit(300));
   }
 
-  private setGraphDepth(depth: GraphDepth): void {
-    this.prefs.setGraph({ depth });
-    this.renderDepthButtons();
-    if (this.currentRoute.type === "graph-local") this.renderGraphPane();
+  private renderGraphControls(): void {
+    const route = this.currentRoute;
+    const filter: GraphFilter | null =
+      route.type === "graph-local"
+        ? {
+            id: route.id,
+            title: this.fullGraph.nodes.find((n) => n.id === route.id)?.title ?? null,
+          }
+        : null;
+    const prefs = this.prefs.getGraph();
+    this.graphControls.render({
+      filter,
+      depth: prefs.depth,
+      nodeScale: prefs.nodeScale,
+      linkWidth: prefs.linkWidth,
+    });
   }
 
-  private renderDepthButtons(): void {
-    const depth = this.prefs.getGraph().depth;
-    for (const [d, btn] of this.depthButtons) btn.classList.toggle("active", d === depth);
+  private setGraphDepth(depth: GraphDepth): void {
+    this.prefs.setGraph({ depth });
+    if (this.currentRoute.type === "graph-local") {
+      this.renderGraphPane();
+    } else {
+      this.renderGraphControls();
+    }
+  }
+
+  private setGraphStyle(style: { nodeScale: number; linkWidth: number }): void {
+    this.prefs.setGraph(style);
+    this.applyGraphStyle();
+    this.renderGraphControls();
+  }
+
+  private applyGraphStyle(): void {
+    const { nodeScale, linkWidth } = this.prefs.getGraph();
+    this.graphView.setStyle({ nodeScale, linkWidth });
   }
 
   private updateGraphSelectionLabel(id: string | null): void {
     if (!id) {
-      this.graphSelectionLabelEl.textContent = "";
+      this.graphControls.setSelectionText("");
       return;
     }
     const node = this.fullGraph.nodes.find((n) => n.id === id);
-    this.graphSelectionLabelEl.textContent = node ? node.title : id;
+    this.graphControls.setSelectionText(node ? node.title : id);
   }
 
   private resizeGraph(): void {

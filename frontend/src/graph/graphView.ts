@@ -6,7 +6,7 @@
 import ForceGraph from "force-graph";
 import type { LinkObject } from "force-graph";
 import type { GraphNode, GraphResponse } from "../types.ts";
-import { neighborIds, nodeHasTags, nodeRadius } from "./transform.ts";
+import { baseNodeRadius, neighborIds, nodeHasTags, nodeVal } from "./transform.ts";
 
 export interface GraphColors {
   background: string;
@@ -26,6 +26,13 @@ export interface GraphViewCallbacks {
   onOpen: (id: string) => void;
 }
 
+export interface GraphStyle {
+  /** Multiplier on the drawn node radius (force-graph nodeRelSize). */
+  nodeScale: number;
+  /** Link stroke width in px. */
+  linkWidth: number;
+}
+
 const DOUBLE_CLICK_MS = 350;
 /** Nodes with at least this many links get a persistent text label. */
 const LABEL_NLINKS_THRESHOLD = 5;
@@ -36,6 +43,7 @@ export class GraphView {
   private selectedId: string | null = null;
   private neighbors: Set<string> = new Set();
   private lastClick: { id: string; time: number } | null = null;
+  private nodeScale = 1;
 
   constructor(
     container: HTMLElement,
@@ -44,7 +52,9 @@ export class GraphView {
   ) {
     this.fg = new ForceGraph<GraphNode>(container)
       .nodeId("id")
-      .nodeVal((n) => nodeRadius(n.nlinks))
+      .nodeRelSize(this.nodeScale)
+      .nodeVal((n) => nodeVal(n.nlinks))
+      .linkWidth(1)
       .nodeLabel((n) => escapeHtml(n.title))
       .nodeColor((n) => this.colorForNode(n))
       .linkColor((l) => this.colorForLink(l))
@@ -84,6 +94,12 @@ export class GraphView {
   setColors(colors: GraphColors): void {
     this.colors = colors;
     this.fg.backgroundColor(colors.background);
+  }
+
+  /** Live-update node/link sizing from user preferences. */
+  setStyle(style: GraphStyle): void {
+    this.nodeScale = style.nodeScale;
+    this.fg.nodeRelSize(style.nodeScale).linkWidth(style.linkWidth);
   }
 
   resize(width: number, height: number): void {
@@ -137,7 +153,7 @@ export class GraphView {
     ctx.textAlign = "center";
     ctx.textBaseline = "top";
     ctx.fillStyle = this.colors.label;
-    const r = nodeRadius(node.nlinks);
+    const r = baseNodeRadius(node.nlinks) * this.nodeScale;
     ctx.fillText(node.title, node.x, node.y + r + 1);
   }
 }

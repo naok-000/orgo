@@ -11,11 +11,14 @@ Emacs, no org-roam SQLite database required.
 
 - **Note browsing** — org files rendered to HTML; `[[id:…]]` links between
   notes are followable in the browser.
+- **LaTeX math** — `$…$`, `$$…$$`, `\(…\)`, `\[…\]`, and environments like
+  `\begin{equation}` render with bundled KaTeX (works offline).
 - **Tabs** — notes open as tabs you can switch and close, like an editor.
   Tabs survive reloads (per note directory).
 - **Graph** — the link structure visualized as an interactive force-directed
-  graph: global view, plus a local neighborhood view per note.
-  Single-click highlights, double-click opens the note.
+  graph: global view, plus a local neighborhood view per note (with a
+  "Show full graph" button to get back). Single-click highlights,
+  double-click opens the note. Node size and link width are adjustable.
 - **Search** — `Ctrl-K` / `Cmd-K` palette searching titles, aliases, and body
   text.
 - **Live reload** — save a file in Emacs and the browser updates.

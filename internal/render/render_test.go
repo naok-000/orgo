@@ -170,3 +170,62 @@ func TestRenderTitleHeading(t *testing.T) {
 		t.Fatalf("expected title in output: %s", got)
 	}
 }
+
+// TestRenderLatexFragmentsSurvive: LaTeX fragments are typeset client-side
+// (KaTeX in frontend/src/ui/math.ts), so the render pipeline must pass each
+// delimiter style through Render()+sanitization verbatim — as HTML-escaped
+// text, delimiters intact.
+func TestRenderLatexFragmentsSurvive(t *testing.T) {
+	cases := []struct {
+		name string
+		src  string
+		want string
+	}{
+		{
+			name: "inline single dollar",
+			src:  "Inline $E = mc^2$ here.",
+			want: "$E = mc^2$",
+		},
+		{
+			name: "display double dollar",
+			src:  `Display $$\int_0^1 x\,dx = \tfrac12$$ here.`,
+			want: `$$\int_0^1 x\,dx = \tfrac12$$`,
+		},
+		{
+			name: "inline parens",
+			src:  `Paren \(a^2 + b^2 = c^2\) here.`,
+			want: `\(a^2 + b^2 = c^2\)`,
+		},
+		{
+			name: "display brackets",
+			src:  `Bracket \[\sum_{n=1}^\infty \frac{1}{n^2}\] here.`,
+			want: `\[\sum_{n=1}^\infty \frac{1}{n^2}\]`,
+		},
+		{
+			name: "equation environment",
+			src:  "\\begin{equation}\nf(x) = x^2\n\\end{equation}\n",
+			want: "\\begin{equation}\nf(x) = x^2\n\\end{equation}",
+		},
+		{
+			name: "align environment escapes ampersands",
+			src:  "\\begin{align}\na &= b \\\\\nc &= d\n\\end{align}\n",
+			want: "\\begin{align}\na &amp;= b \\\\\nc &amp;= d\n\\end{align}",
+		},
+		{
+			name: "inline math escapes angle brackets",
+			src:  "Compare $a < b$ here.",
+			want: "$a &lt; b$",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := Render(tc.src, resolverFor())
+			if err != nil {
+				t.Fatalf("Render: %v", err)
+			}
+			if !strings.Contains(got, tc.want) {
+				t.Fatalf("LaTeX fragment did not survive rendering.\n got: %s\nwant substring: %s", got, tc.want)
+			}
+		})
+	}
+}

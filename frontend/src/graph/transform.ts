@@ -22,9 +22,22 @@ export function toForceGraphData(graph: GraphResponse): ForceGraphData {
   };
 }
 
-/** Node radius scaled by link count (nlinks), used for force-graph nodeVal. */
-export function nodeRadius(nlinks: number): number {
-  return 4 + Math.sqrt(Math.max(0, nlinks)) * 2.5;
+/**
+ * Drawn node radius (px), gently scaled by link count and capped so hub
+ * nodes never dwarf the graph. This is the actual radius we want on screen.
+ */
+export function baseNodeRadius(nlinks: number): number {
+  return Math.min(8, 2 + Math.sqrt(Math.max(0, nlinks)) * 0.9);
+}
+
+/**
+ * force-graph's `nodeVal` is AREA-proportional: drawn radius =
+ * `Math.sqrt(nodeVal) * nodeRelSize`. Squaring baseNodeRadius here means
+ * that with `nodeRelSize(scale)` the drawn radius comes out to exactly
+ * `baseNodeRadius(nlinks) * scale`.
+ */
+export function nodeVal(nlinks: number): number {
+  return baseNodeRadius(nlinks) ** 2;
 }
 
 export function nodeHasTags(node: GraphNode): boolean {

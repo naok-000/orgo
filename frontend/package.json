@@ -16,6 +16,7 @@
     "vitest": "^2.1.8"
   },
   "dependencies": {
-    "force-graph": "^1.51.4"
+    "force-graph": "^1.51.4",
+    "katex": "^0.17.0"
   }
 }
