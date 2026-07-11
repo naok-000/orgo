@@ -1,6 +1,7 @@
 package roam
 
 import (
+	"log"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -86,7 +87,7 @@ func ParseFile(relPath string, content []byte, modTime time.Time) []*Node {
 		}
 	}
 
-	fileID, fileTitle, fileTags, fileAliases, fileRefs := parsePreamble(lines[:firstHeading])
+	fileID, fileTitle, fileTags, fileAliases, fileRefs := parsePreamble(relPath, lines[:firstHeading], literal[:firstHeading])
 	if fileTitle == "" {
 		fileTitle = titleFromFilename(relPath)
 	}
@@ -316,18 +317,28 @@ func stripVerbatim(line string) string {
 // parsePreamble scans the lines before the first headline for the file-level
 // property drawer (:ID:, :ROAM_ALIASES:, :ROAM_REFS:), #+title, and
 // #+filetags.
-func parsePreamble(lines []string) (id, title string, tags, aliases, refs []string) {
+func parsePreamble(relPath string, lines []string, literal []bool) (id, title string, tags, aliases, refs []string) {
 	i := 0
+	propertyDrawerSeen := false
 	for i < len(lines) {
+		if literal[i] {
+			i++
+			continue
+		}
 		line := lines[i]
 		switch {
 		case propStartRe.MatchString(line):
 			props, end := parsePropertyDrawer(lines, i)
-			if v := strings.TrimSpace(props["ID"]); v != "" {
-				id = v
+			if propertyDrawerSeen {
+				if ignoredID := strings.TrimSpace(props["ID"]); ignoredID != "" {
+					log.Printf("roam: ignoring additional preamble ID %q in %s; file ID is %q", ignoredID, relPath, id)
+				}
+			} else {
+				id = strings.TrimSpace(props["ID"])
+				aliases = splitOrgWords(props["ROAM_ALIASES"])
+				refs = strings.Fields(props["ROAM_REFS"])
+				propertyDrawerSeen = true
 			}
-			aliases = append(aliases, splitOrgWords(props["ROAM_ALIASES"])...)
-			refs = append(refs, strings.Fields(props["ROAM_REFS"])...)
 			i = end
 		case titleKeywRe.MatchString(line):
 			m := titleKeywRe.FindStringSubmatch(line)

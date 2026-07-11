@@ -1,6 +1,8 @@
 package roam
 
 import (
+	"bytes"
+	"log"
 	"strings"
 	"testing"
 	"time"
@@ -129,6 +131,85 @@ func TestParseFileRoamRefs(t *testing.T) {
 	want := []string{"https://en.wikipedia.org/wiki/Zettelkasten"}
 	if !stringSlicesEqual(n.Refs, want) {
 		t.Errorf("refs = %v, want %v", n.Refs, want)
+	}
+}
+
+func TestParseFileKeepsFirstPreamblePropertyDrawer(t *testing.T) {
+	src := `:PROPERTIES:
+:ID:       file-id
+:ROAM_ALIASES: canonical
+:ROAM_REFS: @canonical
+:END:
+#+title: Paper
+:PROPERTIES:
+:ID:       accidental-id
+:ROAM_ALIASES: accidental
+:ROAM_REFS: @accidental
+:END:
+
+Body.
+`
+	var logs bytes.Buffer
+	oldOutput := log.Writer()
+	log.SetOutput(&logs)
+	t.Cleanup(func() { log.SetOutput(oldOutput) })
+
+	nodes := ParseFile("paper.org", []byte(src), time.Now())
+	if len(nodes) != 1 {
+		t.Fatalf("expected 1 node, got %d: %+v", len(nodes), nodes)
+	}
+	n := nodes[0]
+	if n.ID != "file-id" {
+		t.Errorf("id = %q, want file-id", n.ID)
+	}
+	if !stringSlicesEqual(n.Aliases, []string{"canonical"}) {
+		t.Errorf("aliases = %v, want [canonical]", n.Aliases)
+	}
+	if !stringSlicesEqual(n.Refs, []string{"@canonical"}) {
+		t.Errorf("refs = %v, want [@canonical]", n.Refs)
+	}
+	wantLog := `roam: ignoring additional preamble ID "accidental-id" in paper.org; file ID is "file-id"`
+	if !strings.Contains(logs.String(), wantLog) {
+		t.Errorf("log = %q, want it to contain %q", logs.String(), wantLog)
+	}
+}
+
+func TestParseFileIgnoresPropertyDrawersInPreambleLiteralBlocks(t *testing.T) {
+	src := `#+begin_example
+:PROPERTIES:
+:ID:       example-id
+:ROAM_ALIASES: example
+:ROAM_REFS: @example
+:END:
+#+end_example
+:PROPERTIES:
+:ID:       file-id
+:ROAM_ALIASES: canonical
+:ROAM_REFS: @canonical
+:END:
+#+title: Paper
+`
+	var logs bytes.Buffer
+	oldOutput := log.Writer()
+	log.SetOutput(&logs)
+	t.Cleanup(func() { log.SetOutput(oldOutput) })
+
+	nodes := ParseFile("paper.org", []byte(src), time.Now())
+	if len(nodes) != 1 {
+		t.Fatalf("expected 1 node, got %d: %+v", len(nodes), nodes)
+	}
+	n := nodes[0]
+	if n.ID != "file-id" {
+		t.Errorf("id = %q, want file-id", n.ID)
+	}
+	if !stringSlicesEqual(n.Aliases, []string{"canonical"}) {
+		t.Errorf("aliases = %v, want [canonical]", n.Aliases)
+	}
+	if !stringSlicesEqual(n.Refs, []string{"@canonical"}) {
+		t.Errorf("refs = %v, want [@canonical]", n.Refs)
+	}
+	if logs.Len() != 0 {
+		t.Errorf("unexpected log for literal property drawer: %q", logs.String())
 	}
 }
 
