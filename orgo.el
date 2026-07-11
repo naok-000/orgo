@@ -38,6 +38,7 @@
 ;;; Code:
 
 (require 'browse-url)
+(require 'url-util)
 
 (declare-function org-entry-get "org" (epom property &optional inherit literal-nil))
 
@@ -81,6 +82,19 @@ When nil, fall back to `org-roam-directory', then to \"~/org-roam\"."
   "Non-nil when the orgo server process is alive."
   (and orgo--process (process-live-p orgo--process)))
 
+(defun orgo--wait-ready (&optional timeout)
+  "Wait until the orgo server accepts connections, up to TIMEOUT seconds.
+Returns non-nil on success."
+  (let ((deadline (+ (float-time) (or timeout 15)))
+        ready)
+    (while (and (not ready) (< (float-time) deadline) (orgo--running-p))
+      (condition-case nil
+          (let ((proc (open-network-stream "orgo-ping" nil "127.0.0.1" orgo-port)))
+            (delete-process proc)
+            (setq ready t))
+        (error (sleep-for 0.2))))
+    ready))
+
 ;;;###autoload
 (defun orgo-start ()
   "Start the orgo server for `orgo-directory'.
@@ -120,9 +134,9 @@ Signals an error when the binary cannot be found."
   "Start the orgo server if needed and open the UI in the browser."
   (interactive)
   (unless (orgo--running-p)
-    (orgo-start)
-    ;; Give the server a moment to bind before the browser connects.
-    (sleep-for 0.3))
+    (orgo-start))
+  (unless (orgo--wait-ready)
+    (user-error "orgo server did not become ready; see buffer *orgo*"))
   (browse-url (orgo--url)))
 
 ;;;###autoload
@@ -136,9 +150,10 @@ Signals an error when the binary cannot be found."
     (unless id
       (user-error "No :ID: property found at point or above"))
     (unless (orgo--running-p)
-      (orgo-start)
-      (sleep-for 0.3))
-    (browse-url (orgo--url (concat "#/note/" id)))))
+      (orgo-start))
+    (unless (orgo--wait-ready)
+      (user-error "orgo server did not become ready; see buffer *orgo*"))
+    (browse-url (orgo--url (concat "#/note/" (url-hexify-string id))))))
 
 (provide 'orgo)
 ;;; orgo.el ends here
