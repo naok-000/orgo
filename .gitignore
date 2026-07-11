@@ -16,3 +16,6 @@ node_modules/
 
 # Claude local settings
 .claude/settings.local.json
+
+# nix build output
+/result
